@@ -1,5 +1,5 @@
 /*
- * Copyright 2019, Cypress Semiconductor Corporation or a subsidiary of
+ * Copyright 2020, Cypress Semiconductor Corporation or a subsidiary of
  * Cypress Semiconductor Corporation. All Rights Reserved.
  *
  * This software, including source code, documentation and related
@@ -39,14 +39,14 @@
 
 #include "sparcommon.h"
 
-#include "wiced_bt_mesh_models.h"
-#include "wiced_bt_mesh_app.h"
 #include "wiced_bt_trace.h"
 #include "wiced_hal_gpio.h"
 #include "wiced_hal_aclk.h"
 #include "wiced_platform.h"
 #include "button_control.h"
 
+#include "wiced_bt_mesh_models.h"
+#include "wiced_bt_mesh_app.h"
 /******************************************************************************
  *                                Constants
  ******************************************************************************/
@@ -55,8 +55,9 @@ static uint16_t button_level_step[NUM_STEPS] =
 {
     0x8000, 0xa000, 0xC000, 0xE000, 0x0000, 0x2000, 0x4000, 0x6000, 0x7FFF,
 };
-
+#if !defined(CYW20706A2)
 extern wiced_platform_button_config_t platform_button[];
+#endif
 /******************************************************************************
  *                          Function Declarations
  ******************************************************************************/
@@ -80,7 +81,12 @@ uint32_t      button_previous_value;
 void button_control_init(void)
 {
     wiced_init_timer(&button_timer, &button_timer_callback, 0, WICED_MILLI_SECONDS_TIMER);
+#if defined(CYW20706A2)
+    wiced_hal_gpio_configure_pin(WICED_GPIO_BUTTON, WICED_GPIO_BUTTON_SETTINGS(GPIO_EN_INT_BOTH_EDGE), WICED_GPIO_BUTTON_DEFAULT_STATE);
+    button_previous_value = wiced_hal_gpio_get_pin_config( WICED_GPIO_BUTTON );
+#else
     button_previous_value = platform_button[WICED_PLATFORM_BUTTON_1].default_state;
+#endif
 }
 
 void button_hardware_init(void)
@@ -116,7 +122,11 @@ void button_interrupt_handler(void* user_data, uint8_t pin)
 
     WICED_BT_TRACE("interrupt_handler: pin:%d value:%d current_time:%d\n", pin, value, current_time);
 
+#if defined(CYW20706A2)
+    if (value == 0) // button pressed
+#else
     if (value == platform_button[WICED_PLATFORM_BUTTON_1].button_pressed_value)
+#endif
     {
         button_pushed_time = current_time;
 

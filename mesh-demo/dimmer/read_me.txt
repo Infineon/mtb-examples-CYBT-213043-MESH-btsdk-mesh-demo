@@ -5,8 +5,7 @@ BLE Mesh Dimmer demo application
 
 Overview
 --------
-This demo application shows a simple dimmer implementation using CYBT-213043-MESH EZ-BT Mesh Evaluation Kit
-/ CYW920819EVB-02 Evaluation Kit.
+This demo application shows a simple dimmer implementation using WICED boards.
 The app implements BLE Mesh Generic Level Client model.
 Normally a dimmer has at least 2 buttons to turn the light on and off.
 This application performs dimming using a single user button available on the
@@ -18,16 +17,15 @@ consecutive push or long push will continue increasing the level.
 If level reaches 100% the next button control will decrease the level.
 
 Features demonstrated
- - Button usage on the CYBT-213043-MESH EZ-BT Mesh Evaluation Kit / CYW920819EVB-02 Evaluation Kit
+ - Button usage on the WICED Kit
  - Controlling of a BLE Mesh light bulb using BLE Mesh Set Level messages
 
-See 20819_readme.txt for more information about the BT SDK.
 
 Instructions
 ------------
 To demonstrate the app, work through the following steps.
-1. Build and download the application to the Mesh Evaluation Board / CYW920819EVB-02 Evaluation Kit
-2. Build and download Mesh_LightDimmable application (Mesh Evaluation Board / CYW920819EVB-02 Evaluation Kit)
+1. Build and download the application to the WICED board.
+2. Build and download Mesh_LightDimmable application to another WICED board.
 3. Use Mesh Client or Mesh Client Control to provision the LightDimmable node as light bulb and the
    Dimmer node as dimmer. (Note: Mesh Client Control requires an additional board that must be programmed
    with provision client app. Please refer to Mesh Client and Mesh Client Control

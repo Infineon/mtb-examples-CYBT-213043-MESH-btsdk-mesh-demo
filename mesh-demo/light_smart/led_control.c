@@ -1,5 +1,5 @@
 /*
- * Copyright 2019, Cypress Semiconductor Corporation or a subsidiary of
+ * Copyright 2020, Cypress Semiconductor Corporation or a subsidiary of
  * Cypress Semiconductor Corporation. All Rights Reserved.
  *
  * This software, including source code, documentation and related
@@ -62,7 +62,7 @@
 /******************************************************************************
  *                                Variables Definitions
  ******************************************************************************/
-#if ( !defined(CYW20719B1) && !defined(CYW20819A1) )
+#if ( !defined(CYW20719B1) && !defined(CYW20819A1) && !defined(CYW20719B2) && !defined(CYW20721B2))
 #define WICED_GPIO_PIN_LED_2 1
 #endif
 wiced_bt_gpio_numbers_t led_pin = WICED_GPIO_PIN_LED_2;
@@ -76,7 +76,11 @@ wiced_bt_gpio_numbers_t led_pin = WICED_GPIO_PIN_LED_2;
  */
 void led_control_init(uint8_t control_type)
 {
+#if (defined(CYW20719B2) || defined(CYW20721B2))
+    wiced_pwm_config_t pwm_config;
+#else
     pwm_config_t pwm_config;
+#endif
 
     if (control_type == LED_CONTROL_TYPE_ONOFF)
         return;
@@ -88,10 +92,15 @@ void led_control_init(uint8_t control_type)
         wiced_hal_pwm_configure_pin(led_pin, PWM_CHANNEL);
 #endif
 
-#ifdef CYW20819A1
+#if (defined(CYW20819A1) || defined(CYW20719B2) || defined(CYW20721B2))
         wiced_hal_gpio_select_function(WICED_GPIO_PIN_LED_2, WICED_PWM0);
 #endif
+
+#if (defined(CYW20719B2) || defined(CYW20721B2))
+        wiced_hal_aclk_enable(PWM_INP_CLK_IN_HZ, WICED_ACLK1, WICED_ACLK_FREQ_24_MHZ);
+#else
         wiced_hal_aclk_enable(PWM_INP_CLK_IN_HZ, ACLK1, ACLK_FREQ_24_MHZ);
+#endif
         wiced_hal_pwm_get_params(PWM_INP_CLK_IN_HZ, 0, PWM_FREQ_IN_HZ, &pwm_config);
         wiced_hal_pwm_start(PWM_CHANNEL, PMU_CLK, pwm_config.toggle_count, pwm_config.init_count, 1);
     }
@@ -106,7 +115,11 @@ void led_control_init(uint8_t control_type)
  */
 void led_control_set_brighness_level(uint8_t brightness_level)
 {
+#if (defined(CYW20719B2) || defined(CYW20721B2))
+    wiced_pwm_config_t pwm_config;
+#else
     pwm_config_t pwm_config;
+#endif
 
     WICED_BT_TRACE("set brightness:%d\n", brightness_level);
 

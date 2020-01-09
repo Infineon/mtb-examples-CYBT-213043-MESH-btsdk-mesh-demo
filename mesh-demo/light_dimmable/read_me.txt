@@ -15,7 +15,7 @@ that the application layer needs to process is those of the Light
 Lightness Model.
 
 Features demonstrated
- - LED usage on the CYBT-213043-MESH EZ-BT Mesh Evaluation Kit / CYW920819EVB-02 Evaluation Kit
+ - LED usage on the WICED Kit
  - Processing of the Light Lightness messages
 
 See chip specific readme for more information about the BT SDK.
@@ -23,9 +23,8 @@ See chip specific readme for more information about the BT SDK.
 Instructions
 ------------
 To demonstrate the app, work through the following steps.
-1. Build and download the application to the Mesh Evaluation Kit / CYW920819EVB-02 Evaluation Kit
-2. Build and download a controlling application such as BLE Mesh Dimmer to another Mesh Evaluation Kit
-   / CYW920819EVB-02 Evaluation Kit
+1. Build and download the application to the WICED Kit.
+2. Build and download a controlling application such as BLE Mesh Dimmer to WICED Kit
 3. Use Mesh Client or Mesh Client Control to provision the LightDimmable node as light bulb and the
    Dimmer node as dimmer. (Note: Mesh Client Control requires an additional board that must be
    programmed with provision client app. Please refer to Mesh Client and Mesh Client Control user guides

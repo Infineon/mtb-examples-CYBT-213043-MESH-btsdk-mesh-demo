@@ -1,5 +1,5 @@
 #
-# Copyright 2019, Cypress Semiconductor Corporation or a subsidiary of
+# Copyright 2020, Cypress Semiconductor Corporation or a subsidiary of
 # Cypress Semiconductor Corporation. All Rights Reserved.
 #
 # This software, including source code, documentation and related
@@ -50,13 +50,23 @@ SUPPORTED_TARGETS = \
   CYW920819EVB-02 \
   CYBT-213043-MESH \
   CYW920820EVB-02 \
-  CYBT-213043-EVAL
+  CYBT-213043-EVAL \
+  CYW920721B2EVK-01 \
+  CYW920721B2EVK-03 \
+  CYW920721B2EVK-02 \
+  CYW920719B2Q40EVB-01 \
+  CYW920706WCDEVAL
 
 TARGET_DEVICE_MAP = \
   CYW920819EVB-02/20819A1 \
   CYBT-213043-MESH/20819A1 \
   CYW920820EVB-02/20820A1 \
-  CYBT-213043-EVAL/20819A1
+  CYBT-213043-EVAL/20819A1 \
+  CYW920721B2EVK-01/20721B2 \
+  CYW920721B2EVK-03/20721B2 \
+  CYW920721B2EVK-02/20721B2 \
+  CYW920719B2Q40EVB-01/20719B2 \
+  CYW920706WCDEVAL/20706A2
 
 CY_TARGET_DEVICE = $(patsubst $(TARGET)/%,%,$(filter $(TARGET)%,$(TARGET_DEVICE_MAP)))
 
@@ -95,7 +105,7 @@ OTA_FW_UPGRADE?=1
 UART?=AUTO
 XIP?=xip
 TRANSPORT?=UART
-ENABLE_DEBUG?=0
+export ENABLE_DEBUG?=0
 
 # wait for SWD attach
 ifeq ($(ENABLE_DEBUG),1)
@@ -129,6 +139,15 @@ endif # PTS
 MESH_MODELS_DEBUG_TRACES ?= 0
 MESH_CORE_DEBUG_TRACES ?= 0
 
+ifeq ($(CY_TARGET_DEVICE), 20706A2)
+# 20706 devices may only have 0 or 1 mesh debug lib linked, disallow multiple
+MESH_DEBUG_LIB_LIST:=$(filter 1,$(MESH_CORE_DEBUG_TRACES) $(MESH_MODELS_DEBUG_TRACES) $(MESH_PROVISIONER_DEBUG_TRACES))
+ifneq ($(filter $(words $(MESH_DEBUG_LIB_LIST)), 0 1),$(words $(MESH_DEBUG_LIB_LIST)))
+$(info MESH_CORE_DEBUG_TRACES=$(MESH_CORE_DEBUG_TRACES) MESH_MODELS_DEBUG_TRACES=$(MESH_MODELS_DEBUG_TRACES) MESH_PROVISIONER_DEBUG_TRACES=$(MESH_PROVISIONER_DEBUG_TRACES))
+$(error $(TARGET) only supports linking 1 mesh debug library at a time)
+endif
+endif
+
 #
 # Components (middleware libraries)
 #
@@ -148,6 +167,11 @@ ifeq ($(MESH_MODELS_DEBUG_TRACES),1)
 COMPONENTS += mesh_models_lib_debug
 else
 COMPONENTS += mesh_models_lib
+endif
+
+ifeq ($(CY_TARGET_DEVICE),20706A2)
+CY_APP_PATCH_LIBS += rtc_lib.a
+CY_APP_PATCH_LIBS += wiced_bt_mesh.a
 endif
 
 ################################################################################

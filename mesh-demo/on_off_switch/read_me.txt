@@ -4,8 +4,7 @@ BLE Mesh OnOff Switch application
 
 Overview
 --------
-This demo application shows an OnOff switch implementation using CYBT-213043-MESH EZ-BT Mesh Evaluation Kit
-/ CYW920819EVB-02 Evaluation Kit.
+This demo application shows an OnOff switch implementation using WICED Kit.
 The app is based on the BLE Mesh Generic OnOff Client model.
 Normally a switch has 2 buttons to turn the light (or any other device) On and Off.
 This application performs On and Off functionality using a single user button
@@ -18,7 +17,7 @@ The application can be compiled to support a Low Power Node feature by adding
 #define LOW_POWER_NODE 1
 
 Features demonstrated
- - Button usage on the CYBT-213043-MESH EZ-BT Mesh Evaluation Kit / CYW920819EVB-02 Evaluation Kit
+ - Button usage on the WICED Kit
  - Controlling of a BLE Mesh light bulb using BLE Mesh On/Off messages
 
 See chip specific readme for more information about the BT SDK.
@@ -26,9 +25,8 @@ See chip specific readme for more information about the BT SDK.
 Instructions
 ------------
 To demonstrate the app, work through the following steps.
-1. Build and download the application to the Mesh Evaluation Kit / CYW920819EVB-02 Evaluation Kit
-2. Build and download BLE Mesh LightDimmable application to another Mesh Evaluation Kit
-   / CYW920819EVB-02 Evaluation Kit
+1. Build and download the application to the WICED Kit
+2. Build and download BLE Mesh LightDimmable application to another WICED Kit
 3. Use Mesh Client or Mesh Client Control to provision the LightDimmable node as
    light bulb and the OnOffSwitch node as on_off_switch.
    (Note: Mesh Client Control requires an additional board that must be programmed with provision client

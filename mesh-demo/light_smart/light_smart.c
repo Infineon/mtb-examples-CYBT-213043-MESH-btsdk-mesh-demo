@@ -1,5 +1,5 @@
 /*
- * Copyright 2019, Cypress Semiconductor Corporation or a subsidiary of
+ * Copyright 2020, Cypress Semiconductor Corporation or a subsidiary of
  * Cypress Semiconductor Corporation. All Rights Reserved.
  *
  * This software, including source code, documentation and related
@@ -80,8 +80,8 @@ uint8_t mesh_mfr_name[WICED_BT_MESH_PROPERTY_LEN_DEVICE_MANUFACTURER_NAME] = { '
 uint8_t mesh_model_num[WICED_BT_MESH_PROPERTY_LEN_DEVICE_MODEL_NUMBER]     = { '1', '2', '3', '4', 0, 0, 0, 0 };
 uint8_t mesh_system_id[8]                                                  = { 0xbb, 0xb8, 0xa1, 0x80, 0x5f, 0x9f, 0x91, 0x71 };
 
-uint32_t mesh_light_lc_ambient_lux_level_on         = 1000;    // Ambient light full daylight in lux
-uint32_t mesh_light_lc_ambient_lux_level_prolong    = 200;     // Ambient light overcast day in lux
+uint32_t mesh_light_lc_ambient_lux_level_on         = 10752;    // Ambient light full daylight in lux
+uint32_t mesh_light_lc_ambient_lux_level_prolong    = 1075;     // Ambient light overcast day in lux
 uint32_t mesh_light_lc_ambient_lux_level_standby    = 0;
 uint16_t mesh_light_lc_lightness_on                 = 65535;
 uint16_t mesh_light_lc_lightness_prolong            = 10000;

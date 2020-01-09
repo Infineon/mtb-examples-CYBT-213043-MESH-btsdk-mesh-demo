@@ -7,7 +7,6 @@ Overview
 This app demonstrates use of SIG BLE mesh model as indicated by the name of
 the application.
 
-See 20819_readme.txt for more information about the BT SDK.
 
 Instructions
 ------------

@@ -1,5 +1,5 @@
 /*
-* Copyright 2019, Cypress Semiconductor Corporation or a subsidiary of
+* Copyright 2020, Cypress Semiconductor Corporation or a subsidiary of
 * Cypress Semiconductor Corporation. All Rights Reserved.
 *
 * This software, including source code, documentation and related
@@ -78,6 +78,7 @@
 #include "wiced_bt_mesh_models.h"
 #include "wiced_bt_trace.h"
 #include "wiced_bt_mesh_app.h"
+#include "wiced_timer.h"
 #include "button_control.h"
 
 #ifdef HCI_CONTROL
