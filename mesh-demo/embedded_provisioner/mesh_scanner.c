@@ -45,9 +45,12 @@
 #include "wiced_timer.h"
 #include "wiced_bt_trace.h"
 #include "wiced_bt_mesh_model_utils.h"
-//#include "../mesh_models_lib/remote_provision_server.h"
 #include "embedded_provisioner.h"
 #include "mesh_scanner.h"
+
+#define RSSI_TEST           1
+#define EMBEDDED_PROVISION  1
+#define SELF_CONFIG         1
 
 #if defined(EMBEDDED_PROVISION)
 
@@ -66,10 +69,11 @@ void mesh_scanner_before_provision_delay_timeout(TIMER_PARAM_TYPE arg);
 wiced_bt_mesh_event_t* mesh_scanner_create_event(uint16_t dst);
 int mesh_scanner_select_provisioner(mesh_unprov_node_t* p_unprov_node);
 void mesh_scanner_scan_status_timeout(TIMER_PARAM_TYPE arg);
-static wiced_bool_t mesh_provsioner_validate_unprovision_device(mesh_unprov_node_t* p_unprov_node);
+static wiced_bool_t mesh_provsioner_validate_unprovision_device(wiced_bt_mesh_provision_scan_report_data_t* p_data);
 wiced_bool_t mesh_scanner_scan_start(uint8_t rpr_idx);
 mesh_unprov_node_t* mesh_scanner_alloc_unprov_node(void);
 void mesh_scanner_free_unprov_node(mesh_unprov_node_t* p_unprov_node);
+uint32_t mesh_scanner_get_num_unprov_nodes(void);
 wiced_bool_t mesh_scanner_check_unprov_node(mesh_unprov_node_t* p_unprov_node);
 int find_rpr_idx(uint16_t rpr_addr);
 
@@ -116,9 +120,8 @@ wiced_bool_t mesh_scanner_scan_start(uint8_t rpr_idx)
     int i;
     wiced_bt_mesh_event_t* p_event;
     wiced_bt_mesh_provision_scan_start_data_t data;
-#ifdef MEASURE_RSSI
     mesh_unprov_node_t* p_unprov_node;
-#endif
+
     // we will only do 1 start at a time
     for (i = 0; i < EMBEDDED_PROV_MAX_NODES; i++)
     {
@@ -153,15 +156,14 @@ wiced_bool_t mesh_scanner_scan_start(uint8_t rpr_idx)
         return WICED_FALSE;
     }
 
-#ifdef MEASURE_RSSI
-    // allow new provisioner some time to measure and report RSSI of unprovisioned nodes.
-    // This may increase total system provisioning time, but will help in selecting relays
+    // New provisioner may be a better choice of provisioning devices that have been already reported.
+    // Give new provisioner some time to measure and report RSSI of unprovisioned nodes.
+    // This may increase total system provisioning time.
     for (p_unprov_node = p_provisioner_state->p_unprov_node_first; p_unprov_node != NULL; p_unprov_node = p_unprov_node->p_next)
     {
         if (p_unprov_node->rpr_addr == 0)
             wiced_start_timer(&p_unprov_node->timer, BEFORE_PROVISION_DELAY);
     }
-#endif
     return WICED_TRUE;
 }
 
@@ -172,10 +174,14 @@ void start_scan_next(void)
 {
     int i;
 
-    WICED_BT_TRACE("start next available %04x %04x %04x\n", p_provisioner_state->rpr_node[0].addr, p_provisioner_state->rpr_node[1].addr, p_provisioner_state->rpr_node[2].addr);
     for (i = 0; i < EMBEDDED_PROV_MAX_NODES; i++)
     {
-        if ((p_provisioner_state->rpr_node[i].addr != 0) && (p_provisioner_state->rpr_node[i].rpr_scan_state == RPR_STATE_IDLE))
+        if (p_provisioner_state->rpr_node[i].addr != 0)
+        {
+            WICED_BT_TRACE("start next %04x state:%d\n", p_provisioner_state->rpr_node[i].addr, p_provisioner_state->rpr_node[i].rpr_scan_state);
+        }
+        if ((p_provisioner_state->rpr_node[i].addr != 0) &&
+            ((p_provisioner_state->rpr_node[i].rpr_scan_state == RPR_STATE_IDLE) || (p_provisioner_state->rpr_node[i].rpr_scan_state == RPR_STATE_RESTART_REQUIRED)))
         {
             mesh_scanner_scan_start(i);
             return;
@@ -238,11 +244,20 @@ void mesh_scanner_process_scan_report(wiced_bt_mesh_event_t* p_event, wiced_bt_m
     mesh_unprov_node_t* p_unprov_node, * p_temp;
     wiced_bool_t reported_node = WICED_FALSE;
     int rpr_idx;
+    int i;
 
-    WICED_BT_TRACE("unprovisioned from:%04x device %02x-%02x oob:%04x rssi:%d\n", src, p_data->uuid[0], p_data->uuid[15], p_data->oob, p_data->rssi);
     wiced_bt_mesh_release_event(p_event);
 
     if (p_provisioner_state->state == EMBEDDED_PROVISIONER_STATE_RESET)
+        return;
+
+    if (p_data->rssi < EMBEDDED_PROV_MIN_RSSI)
+    {
+        WICED_BT_TRACE("unprovisioned from:%04x device %02x-%02x oob:%04x rssi:%d too far\n", src, p_data->uuid[0], p_data->uuid[15], p_data->oob, p_data->rssi);
+        return;
+    }
+    // check if this device is of interest
+    if (!mesh_provsioner_validate_unprovision_device(p_data))
         return;
 
     // find the provisioner which found the new node
@@ -262,11 +277,28 @@ void mesh_scanner_process_scan_report(wiced_bt_mesh_event_t* p_event, wiced_bt_m
             break;
         }
     }
-    WICED_BT_TRACE("reported:%d\n", reported_node);
+
+    WICED_BT_TRACE("unprovisioned from:%04x device %02x-%02x oob:%04x rssi:%d reported:%d\n", src, p_data->uuid[0], p_data->uuid[15], p_data->oob, p_data->rssi, reported_node);
 
     if (!reported_node)
     {
-        // if we got here, none of the RPRs have seen this device before
+        // if we got here, none of the RPRs have seen this device before. Check number of outstanding unprovisioned nodes
+        if (mesh_scanner_get_num_unprov_nodes() >= EMBEDDED_PROV_UNPROV_HI_THRESH)
+        {
+            WICED_BT_TRACE("too many outstanding unprovisioned nodes\n");
+
+            // We do not stop the scan, but we need to restart the scan because this device will not be reported anymore.
+            for (i = 0; i < EMBEDDED_PROV_MAX_NODES; i++)
+            {
+                if (p_provisioner_state->rpr_node[i].addr == src)
+                {
+                    p_provisioner_state->rpr_node[i].rpr_scan_state = RPR_STATE_RESTART_REQUIRED;
+                    break;
+                }
+            }
+            return;
+        }
+
         if ((p_unprov_node = mesh_scanner_alloc_unprov_node()) == NULL)
         {
             WICED_BT_TRACE("new device from %04x no mem\n", src);
@@ -283,7 +315,7 @@ void mesh_scanner_process_scan_report(wiced_bt_mesh_event_t* p_event, wiced_bt_m
     // If there are no other provisioners in the network that can report this device, we can start provisioning, otherwise wait.
     for (rpr_idx = 0; rpr_idx < EMBEDDED_PROV_MAX_NODES; rpr_idx++)
     {
-        if ((p_provisioner_state->rpr_node[rpr_idx].addr != 0) && (p_unprov_node->rssi_table[rpr_idx] == 0))
+        if ((p_provisioner_state->rpr_node[rpr_idx].addr != 0) && (p_provisioner_state->rpr_node[rpr_idx].rpr_scan_state == RPR_STATE_SCANNING) && (p_unprov_node->rssi_table[rpr_idx] == 0))
         {
             WICED_BT_TRACE("keep waiting for %04x\n", p_provisioner_state->rpr_node[rpr_idx].addr);
             return;
@@ -321,13 +353,6 @@ void mesh_scanner_before_provision_delay_timeout(TIMER_PARAM_TYPE arg)
         WICED_BT_TRACE("Provisioner already assigned addr:%04x\n", p_unprov_node->rpr_addr);
         return;
     }
-    // check if this device is of interest
-    if (!mesh_provsioner_validate_unprovision_device(p_unprov_node))
-    {
-        mesh_scanner_free_unprov_node(p_unprov_node);
-        return;
-    }
-
     rpr_idx = mesh_scanner_select_provisioner(p_unprov_node);
     if (rpr_idx == -1)
     {
@@ -335,7 +360,7 @@ void mesh_scanner_before_provision_delay_timeout(TIMER_PARAM_TYPE arg)
         wiced_start_timer(&p_unprov_node->timer, 2); // PROVISION_RETRY_DELAY);
         return;
     }
-    WICED_BT_TRACE("Provisioner selected:%d addr:%04x\n", rpr_idx, p_provisioner_state->rpr_node[rpr_idx].addr);
+    WICED_BT_TRACE("Provisioner selected:%d addr:%04x for %02x-%02x\n", rpr_idx, p_provisioner_state->rpr_node[rpr_idx].addr, p_unprov_node->uuid[0], p_unprov_node->uuid[15]);
 
     if ((p_event = mesh_scanner_create_event(p_provisioner_state->rpr_node[rpr_idx].addr)) == NULL)
         return;
@@ -362,32 +387,26 @@ void mesh_scanner_before_provision_delay_timeout(TIMER_PARAM_TYPE arg)
 /*
  * Check if this device has to be provisioned by the embedded provisioner, return FALSE to skip
  */
-wiced_bool_t mesh_provsioner_validate_unprovision_device(mesh_unprov_node_t* p_unprov_node)
+wiced_bool_t mesh_provsioner_validate_unprovision_device(wiced_bt_mesh_provision_scan_report_data_t* p_data)
 {
     int i;
     uint64_t magic_number = EMBEDDED_PROV_UUID_MAGIC_NUBMER;
 
-    WICED_BT_TRACE("Validate unprov\n");
 #ifdef EMBEDDED_PROV_RSSI_THRESHOLD
-    // This app provisions every device which comes close enough
-    // find the provisioner which found the new node
-    for (i = 0; i < EMBEDDED_PROV_MAX_NODES; i++)
-    {
-        if ((p_provisioner_state->rpr_node[i].addr != 0) &&
-            (p_unprov_node->rssi_table[i] > EMBEDDED_PROV_RSSI_THRESHOLD))
-            return WICED_TRUE;
-    }
+    if (p_data->rssi > EMBEDDED_PROV_RSSI_THRESHOLD))
+        return WICED_TRUE;
 #endif
 #ifdef EMBEDDED_PROV_UUID_MAGIC_NUBMER
-    if (memcmp(&p_unprov_node->uuid[5], (uint8_t*)&magic_number + 1, 7) == 0)
+    if (memcmp(&p_data->uuid[5], (uint8_t*)&magic_number + 1, 7) == 0)
     {
         WICED_BT_TRACE("Validate passed\n");
         return WICED_TRUE;
     }
     else
     {
-        WICED_BT_TRACE_ARRAY((uint8_t *)&p_unprov_node->uuid[4], 8, "received ");
-        WICED_BT_TRACE_ARRAY((uint8_t *)&magic_number, 8,           "expected ");
+        WICED_BT_TRACE("Validate failed\n");
+        WICED_BT_TRACE_ARRAY((uint8_t *)&p_data->uuid[4], 8, "received ");
+        WICED_BT_TRACE_ARRAY((uint8_t *)&magic_number, 8, "expected ");
     }
 #endif
     return WICED_FALSE;
@@ -404,8 +423,8 @@ int mesh_scanner_select_provisioner(mesh_unprov_node_t* p_unprov_node)
 
     for (i = 0; i < EMBEDDED_PROV_MAX_NODES; i++)
     {
-        // if this provisioner reported this node
-        if (p_unprov_node->rssi_table[i] == 0)
+        // if this provisioner reported this node at reasonable RSSI
+        if ((p_unprov_node->rssi_table[i] == 0) || (p_unprov_node->rssi_table[i] < EMBEDDED_PROV_MIN_RSSI))
             continue;
 
         // RPR can only provision one device at a time
@@ -421,6 +440,31 @@ int mesh_scanner_select_provisioner(mesh_unprov_node_t* p_unprov_node)
         rpr_idx = i;
     }
     return rpr_idx;
+}
+
+/*
+ * Free up unprovisioned node structure and restart scan if needed
+ */
+void mesh_scanner_provision_end(mesh_unprov_node_t* p_unprov_node)
+{
+    int i;
+
+    mesh_scanner_free_unprov_node(p_unprov_node);
+
+    // Check if scanning need to be restarted for any of the RPRs
+    if (mesh_scanner_get_num_unprov_nodes() < EMBEDDED_PROV_UNPROV_LO_THRESH)
+    {
+        // We do not stop the scan, but we need to restart the scan because this device will not be reported anymore.
+        for (i = 0; i < EMBEDDED_PROV_MAX_NODES; i++)
+        {
+            if (p_provisioner_state->rpr_node[i].rpr_scan_state == RPR_STATE_RESTART_REQUIRED)
+            {
+                start_scan_next();
+                break;
+            }
+        }
+
+    }
 }
 
 wiced_bt_mesh_event_t* mesh_scanner_create_event(uint16_t dst)
@@ -491,6 +535,20 @@ void mesh_scanner_free_unprov_node(mesh_unprov_node_t* p_unprov_node)
     wiced_deinit_timer(&p_unprov_node->timer);
 
     wiced_bt_free_buffer(p_unprov_node);
+}
+
+/*
+ * Get number of nodes waiting to be provisioned.
+ */
+uint32_t mesh_scanner_get_num_unprov_nodes(void)
+{
+    mesh_unprov_node_t* p_temp;
+    uint32_t num_unprov_nodes = 0;
+
+    for (p_temp = p_provisioner_state->p_unprov_node_first; p_temp != NULL; p_temp = p_temp->p_next)
+        num_unprov_nodes++;
+
+    return num_unprov_nodes;
 }
 
 /*

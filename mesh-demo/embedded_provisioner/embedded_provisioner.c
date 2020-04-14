@@ -96,6 +96,10 @@
  * 4. Push/release the application button on the dimmer_self_config app.
  *    The LEDs on other boards should turn on.
  */
+#define RSSI_TEST           1
+#define EMBEDDED_PROVISION  1
+#define SELF_CONFIG         1
+
 #include "wiced_bt_ble.h"
 #include "wiced_bt_gatt.h"
 #include "wiced_bt_mesh_models.h"
@@ -109,12 +113,11 @@
 #include "wiced_hal_rand.h"
 #include "wiced_hal_wdog.h"
 #include "wiced_hal_nvram.h"
+#include "wiced_firmware_upgrade.h"
 #include "wiced_bt_mesh_model_utils.h"
 #include "wiced_bt_mesh_provision.h"
 #include "mesh_application.h"
-#if (defined(SELF_CONFIG) || defined(EMBEDDED_PROVISION))
 #include "embedded_provisioner.h"
-#endif
 #if defined(EMBEDDED_PROVISION)
 #include "mesh_scanner.h"
 #endif
@@ -126,11 +129,13 @@
 #include "wiced_bt_cfg.h"
 extern wiced_bt_cfg_settings_t wiced_bt_cfg_settings;
 
+uint8_t app_key[16];
+
 /******************************************************
  *          Constants
  ******************************************************/
 #define MESH_PID                0x321F
-#define MESH_VID                0x0001
+#define MESH_VID                0x0002
 #define MESH_CACHE_REPLAY_SIZE  0x0008
 
 /******************************************************
@@ -141,6 +146,7 @@ extern wiced_bt_cfg_settings_t wiced_bt_cfg_settings;
  *          Function Prototypes
  ******************************************************/
 static void mesh_app_init(wiced_bool_t is_provisioned);
+static uint32_t mesh_app_proc_rx_cmd(uint16_t opcode, uint8_t* p_data, uint32_t length);
 static void mesh_app_factory_reset(void);
 static void mesh_app_attention(uint8_t element_idx, uint8_t time);
 static void mesh_app_message_handler(uint8_t element_idx, uint16_t event, void *p_data);
@@ -174,6 +180,9 @@ wiced_bt_mesh_core_config_model_t   mesh_element1_models[] =
 #endif
 #if defined(REMOTE_PROVISION_SERVER_SUPPORTED)
     WICED_BT_MESH_MODEL_REMOTE_PROVISION_SERVER,
+#endif
+#if defined(MESH_DFU_SUPPORTED)
+    WICED_BT_MESH_MODEL_FW_DISTRIBUTOR_UPDATE_SERVER,
 #endif
     WICED_BT_MESH_MODEL_LIGHT_LIGHTNESS_SERVER,
 #if (defined(SELF_CONFIG) || defined(EMBEDDED_PROVISION))
@@ -209,10 +218,10 @@ wiced_bt_mesh_core_config_t  mesh_config =
     .product_id         = MESH_PID,                                 // Vendor-assigned product identifier
     .vendor_id          = MESH_VID,                                 // Vendor-assigned product version identifier
     .replay_cache_size  = MESH_CACHE_REPLAY_SIZE,                   // Number of replay protection entries, i.e. maximum number of mesh devices that can send application messages to this device.
-    .features           = WICED_BT_MESH_CORE_FEATURE_BIT_FRIEND | WICED_BT_MESH_CORE_FEATURE_BIT_RELAY | WICED_BT_MESH_CORE_FEATURE_BIT_GATT_PROXY_SERVER,   // In Friend mode support friend, relay
+    .features           = WICED_BT_MESH_CORE_FEATURE_BIT_RELAY,     // No friend no proxy for this app
     .friend_cfg         =                                           // Configuration of the Friend Feature(Receive Window in Ms, messages cache)
     {
-        .receive_window        = 200,                               // Receive Window value in milliseconds supported by the Friend node.
+        .receive_window        = 20,                                // Receive Window value in milliseconds supported by the Friend node.
         .cache_buf_len         = 300,                               // Length of the buffer for the cache
         .max_lpn_num           = 4                                  // Max number of Low Power Nodes with established friendship. Must be > 0 if Friend feature is supported.
     },
@@ -243,7 +252,7 @@ wiced_bt_mesh_app_func_table_t wiced_bt_mesh_app_func_table =
     NULL,                   // GATT connection status
     mesh_app_attention,     // attention processing
     NULL,                   // notify period set
-    NULL,                   // WICED HCI command
+    mesh_app_proc_rx_cmd,   // WICED HCI command
     NULL,                   // LPN sleep
     mesh_app_factory_reset, // factory reset
 };
@@ -318,6 +327,7 @@ uint8_t self_configuration_done = WICED_FALSE;
 
 #if defined(EMBEDDED_PROVISION)
 static void create_network(void);
+static void configure_net_beacon_set(uint16_t node_addr, uint8_t beacon_state);
 static void configure_app_key_add(uint16_t node_addr, uint16_t net_key_idx, uint8_t* p_app_key, uint16_t app_key_idx);
 static void configure_model_app_bind(uint16_t node_addr, wiced_bt_mesh_core_config_model_t* p_model, uint8_t element_idx, uint16_t app_key_idx);
 static void configure_model_sub(uint16_t node_addr, wiced_bt_mesh_core_config_model_t* p_model, uint8_t element_idx, uint16_t group_addr);
@@ -346,6 +356,7 @@ uint8_t static_oob[16];
 #endif
 
 mesh_embedded_provisioner_state_t *p_provisioner_state = NULL;
+extern wiced_bool_t mesh_config_client;
 
 /******************************************************
  *               Function Definitions
@@ -358,7 +369,7 @@ void mesh_app_init(wiced_bool_t is_provisioned)
     mesh_node_t node;
 
 #if defined(SELF_CONFIG) && defined(EMBEDDED_PROVISION)
-    WICED_BT_TRACE("Embedded provisioner and Self Config\n");
+    WICED_BT_TRACE("Embedded provisioner and Self Config event:%d unprov:%d\n", sizeof(wiced_bt_mesh_event_t), sizeof(mesh_unprov_node_t));
 #elif defined(EMBEDDED_PROVISION)
     WICED_BT_TRACE("Embedded provisioner\n");
 #elif defined(SELF_CONFIG)
@@ -368,15 +379,15 @@ void mesh_app_init(wiced_bool_t is_provisioned)
     WICED_BT_TRACE("tx_power:%d to 0\n", wiced_bt_mesh_core_adv_tx_power);
     wiced_bt_mesh_core_adv_tx_power = 0;
 #endif
-
-#if 0
+    WICED_BT_TRACE("%s %s\n", __DATE__, __TIME__);
+#if 1
     // Set Debug trace level for mesh_models_lib and mesh_provisioner_lib
     wiced_bt_mesh_models_set_trace_level(WICED_BT_MESH_CORE_TRACE_INFO);
 #endif
-#if 0
+#if 1
     // Set Debug trace level for all modules but Info level for CORE_AES_CCM module
     wiced_bt_mesh_core_set_trace_level(WICED_BT_MESH_CORE_TRACE_FID_ALL, WICED_BT_MESH_CORE_TRACE_DEBUG);
-    wiced_bt_mesh_core_set_trace_level(WICED_BT_MESH_CORE_TRACE_FID_CORE_AES_CCM, WICED_BT_MESH_CORE_TRACE_INFO);
+    wiced_bt_mesh_core_set_trace_level(WICED_BT_MESH_CORE_TRACE_FID_CORE_AES_CCM, WICED_BT_MESH_CORE_TRACE_NO);
 #endif
 
     wiced_bt_cfg_settings.device_name = (uint8_t *)"Dimmable Light";
@@ -421,6 +432,12 @@ void mesh_app_init(wiced_bool_t is_provisioned)
     wiced_bt_mesh_remote_provisioning_server_init();
 #endif
 
+#if defined(MESH_DFU_SUPPORTED)
+    wiced_bt_mesh_model_fw_update_server_init(0, NULL, is_provisioned);
+    wiced_bt_mesh_model_fw_distribution_server_init();
+    wiced_bt_mesh_model_blob_transfer_server_init(0);
+#endif
+
 #if (defined(SELF_CONFIG) || defined(EMBEDDED_PROVISION))
     wiced_bt_mesh_config_client_init(mesh_config_client_message_handler, is_provisioned);
     wiced_bt_mesh_model_default_transition_time_client_init(0, mesh_default_transition_time_client_message_handler, is_provisioned);
@@ -463,6 +480,12 @@ void mesh_app_init(wiced_bool_t is_provisioned)
 #endif
     // Initialize Light Lightness Server and register a callback which will be executed when it is time to change the brightness of the bulb
     wiced_bt_mesh_model_light_lightness_server_init(MESH_LIGHT_LIGHTNESS_SERVER_ELEMENT_INDEX, mesh_app_message_handler, is_provisioned);
+    mesh_config_client = WICED_FALSE;
+
+#if defined(RSSI_TEST)
+    if (is_provisioned)
+        rssi_test_init();
+#endif
 }
 
 /*
@@ -591,7 +614,7 @@ void mesh_embedded_provisioner_scan_restart(TIMER_PARAM_TYPE arg)
 
     for (i = 0; i < EMBEDDED_PROV_MAX_NODES; i++)
     {
-        if ((p_provisioner_state->rpr_node[i].addr != 0) && (p_provisioner_state->rpr_node[i].rpr_scan_state != RPR_STATE_FAILED))
+        if ((p_provisioner_state->rpr_node[i].addr != 0) /* && (p_provisioner_state->rpr_node[i].rpr_scan_state != RPR_STATE_FAILED) */)
             p_provisioner_state->rpr_node[i].rpr_scan_state = RPR_STATE_IDLE;
     }
     mesh_scanner_scan_start(0);
@@ -848,8 +871,13 @@ void mesh_provisioner_process_provision_end(wiced_bt_mesh_event_t* p_event, wice
         WICED_BT_TRACE_ARRAY(node.uuid, sizeof(node.uuid), "uuid       ");
         WICED_BT_TRACE_ARRAY(node.dev_key, sizeof(node.dev_key), "dev key    ");
         WICED_BT_TRACE_ARRAY((uint8_t *)node.rssi_table, sizeof(node.rssi_table), "rssi table ");
+
+//#if defined(RSSI_TEST)
+//        // Set delay for 20sec just in case we find and provision more devices
+//        rssi_test_start(0, 0, 0, 20000);
+//#endif
     }
-    mesh_scanner_free_unprov_node(p_unprov_node);
+    mesh_scanner_provision_end(p_unprov_node);
 }
 
 /*
@@ -860,7 +888,7 @@ void mesh_provisioner_process_link_report(wiced_bt_mesh_event_t* p_event, wiced_
     uint16_t rpr_addr = p_event->src;
     int i;
 
-    WICED_BT_TRACE("provision link report from %x status:%d state:%d reason:%d over_gatt:%d\n", rpr_addr, p_data->link_status, p_data->rpr_state, p_data->reason, p_data->over_gatt);
+    WICED_BT_TRACE("provision link report from %04x status:%d state:%d reason:%d over_gatt:%d\n", rpr_addr, p_data->link_status, p_data->rpr_state, p_data->reason, p_data->over_gatt);
     wiced_bt_mesh_release_event(p_event);
 
     // Find RPR which perform provisioning
@@ -880,7 +908,7 @@ void mesh_provisioner_process_link_report(wiced_bt_mesh_event_t* p_event, wiced_
 
     WICED_BT_TRACE("rpr_addr:%04x idx:%d new_node_addr:%04x\n", rpr_addr, i, p_provisioner_state->rpr_node[i].new_node_addr);
 
-    configure_app_key_add(p_provisioner_state->rpr_node[i].new_node_addr, EMBEDDED_PROV_NET_KEY_IDX, (uint8_t *)wiced_bt_mesh_core_get_app_key(EMBEDDED_PROV_APP_KEY_IDX, WICED_FALSE), EMBEDDED_PROV_APP_KEY_IDX);
+    configure_app_key_add(p_provisioner_state->rpr_node[i].new_node_addr, EMBEDDED_PROV_NET_KEY_IDX, (uint8_t*)wiced_bt_mesh_core_get_app_key(EMBEDDED_PROV_APP_KEY_IDX, WICED_FALSE), EMBEDDED_PROV_APP_KEY_IDX);
 }
 
 /*
@@ -898,7 +926,6 @@ void mesh_configure_app_key_status(wiced_bt_mesh_event_t *p_event, wiced_bt_mesh
     WICED_BT_TRACE("AppKey Status from:%04x status:%d NetKeyIdx:%x ApptKeyIdx:%x\n", src,
         p_data->status, p_data->net_key_idx, p_data->app_key_idx);
 
-    // allocate address for the new node. go through all network to find the biggest addr
     for (i = EMBEDDED_PROV_NODE_ADDR_FIRST + 1; i < EMBEDDED_PROV_NODE_ADDR_LAST; i++)
     {
         if ((wiced_hal_read_nvram(i, sizeof(mesh_node_t), (uint8_t*)&node, &result) == sizeof(mesh_node_t)) &&
@@ -931,7 +958,6 @@ void mesh_configure_model_app_bind_status(wiced_bt_mesh_event_t *p_event, wiced_
     WICED_BT_TRACE("Model App Bind Status from:%x status:%d Element:%d Model ID:%x AppKeyIdx:%x\n", src,
         p_data->status, p_data->element_addr, p_data->model_id, p_data->app_key_idx);
 
-    // allocate address for the new node. go through all network to find the biggest addr
     for (i = EMBEDDED_PROV_NODE_ADDR_FIRST + 1; i < EMBEDDED_PROV_NODE_ADDR_LAST; i++)
     {
         if ((wiced_hal_read_nvram(i, sizeof(mesh_node_t), (uint8_t*)&node, &result) == sizeof(mesh_node_t)) &&
@@ -999,7 +1025,8 @@ void mesh_node_reset_failed(wiced_bt_mesh_event_t* p_event)
 }
 
 #endif
-#if defined(EMBEDDED_PROVISION) || defined(SELF_CONFIG)
+#endif
+#if defined(EMBEDDED_PROVISION) || defined(SELF_CONFIG) || defined(RSSI_TEST)
 /*
  * This function is called when core receives a valid message for the defined Vendor
  * Model (MESH_VENDOR_CYPRESS_COMPANY_ID/MESH_VENDOR_SELF_CONFIG_MODEL_ID) combination.  The function shall return TRUE if it
@@ -1017,7 +1044,7 @@ wiced_bool_t mesh_vendor_server_message_handler(wiced_bt_mesh_event_t *p_event, 
 
     // 0xffff model_id means request to check if that opcode belongs to that model
     if (p_event->model_id == 0xffff)
-        return (p_event->opcode == MESH_VENDOR_CYPRSESS_OPCODE_CONFIG);
+        return ((p_event->company_id == MESH_VENDOR_CYPRESS_COMPANY_ID) && (p_event->opcode == MESH_VENDOR_CYPRSESS_OPCODE_CONFIG));
 
     WICED_BT_TRACE("vs process data from:%04x reply:%04x len:%d subcode:%d prov_state:%04x\n", p_event->src, p_event->reply, data_len, p_data[0], p_provisioner_state);
     src = p_event->src;
@@ -1031,69 +1058,99 @@ wiced_bool_t mesh_vendor_server_message_handler(wiced_bt_mesh_event_t *p_event, 
     }
 
     // If provisioner, only process MESH_VENDOR_OPCODE_CONFIGURE_STATUS, otherwise only _SET
-    if (p_provisioner_state != NULL)
+    switch (p_data[0])
     {
 #if defined(EMBEDDED_PROVISION)
-        // cancel transmission if we receive the ack
-        if (p_data[0] == MESH_VENDOR_OPCODE_CONFIGURE_STATUS)
-        {
-            // If we are still retransmitting cancel transmit and release mesh event
-            wiced_bt_mesh_models_utils_ack_received(&p_provisioner_state->p_out_event, p_event->src);
-        }
-        else if (p_data[0] == MESH_VENDOR_OPCODE_CONFIGURE_COMPLETE)
-        {
-            // If we are still retransmitting cancel transmit and release mesh event
-            wiced_bt_mesh_models_utils_ack_received(&p_provisioner_state->p_out_event, p_event->src);
+    case MESH_VENDOR_OPCODE_CONFIGURE_STATUS:
+        if (p_provisioner_state == NULL)
+            break;
 
-            // If new node supports remote provisioning, add it to the list of scanners
-            // Find location in the NVRAM and write new node info
-            for (i = EMBEDDED_PROV_NODE_ADDR_FIRST + 1; i < EMBEDDED_PROV_NODE_ADDR_LAST; i++)
+        // If we are still retransmitting cancel transmit and release mesh event
+        wiced_bt_mesh_models_utils_ack_received(&p_provisioner_state->p_out_event, p_event->src);
+        break;
+
+    case MESH_VENDOR_OPCODE_CONFIGURE_COMPLETE:
+        if (p_provisioner_state == NULL)
+            break;
+
+        // If we are still retransmitting cancel transmit and release mesh event
+        wiced_bt_mesh_models_utils_ack_received(&p_provisioner_state->p_out_event, p_event->src);
+
+        // If new node supports remote provisioning, add it to the list of scanners
+        // Find location in the NVRAM and write new node info
+        for (i = EMBEDDED_PROV_NODE_ADDR_FIRST + 1; i < EMBEDDED_PROV_NODE_ADDR_LAST; i++)
+        {
+            if ((wiced_hal_read_nvram(i, sizeof(mesh_node_t), (uint8_t*)&node, &result) == sizeof(mesh_node_t)) &&
+                (node.addr == p_event->src))
             {
-                if ((wiced_hal_read_nvram(i, sizeof(mesh_node_t), (uint8_t*)&node, &result) == sizeof(mesh_node_t)) &&
-                    (node.addr == p_event->src))
+                if ((node.uuid[4] & CY_MAGIC_RPR_SUPPORTED) != 0)
                 {
-                    if ((node.uuid[4] & CY_MAGIC_RPR_SUPPORTED) != 0)
+                    if ((rpr_idx = mesh_scanner_add_provisioner(node.addr)) != -1)
                     {
-                        if ((rpr_idx = mesh_scanner_add_provisioner(node.addr)) != -1)
-                        {
-                            mesh_scanner_scan_start(rpr_idx);
-                        }
+                        mesh_scanner_scan_start(rpr_idx);
                     }
-                    break;
                 }
+                break;
             }
         }
+        break;
 #endif
-    }
-    else
-    {
 #if defined(SELF_CONFIG)
-        if (p_data[0] == MESH_VENDOR_OPCODE_CONFIGURE_SET)
-        {
-            UINT8_TO_STREAM(p, MESH_VENDOR_OPCODE_CONFIGURE_STATUS);
-            wiced_bt_mesh_models_utils_send(wiced_bt_mesh_create_reply_event(p_event), NULL, WICED_FALSE, MESH_VENDOR_CYPRSESS_OPCODE_CONFIG, buffer, (uint8_t)(p - buffer), NULL);
+    case MESH_VENDOR_OPCODE_CONFIGURE_SET:
+        if (p_provisioner_state != NULL)
+            break;
 
-            // it can be a retransmission
-            if (self_configuration_done)
-                return WICED_TRUE;
+        UINT8_TO_STREAM(p, MESH_VENDOR_OPCODE_CONFIGURE_STATUS);
+        wiced_bt_mesh_models_utils_send(wiced_bt_mesh_create_reply_event(p_event), NULL, WICED_FALSE, MESH_VENDOR_CYPRSESS_OPCODE_CONFIG, buffer, (uint8_t)(p - buffer), NULL);
 
-            self_configuration_done = WICED_TRUE;
-
-            self_configure(wiced_bt_mesh_core_get_local_addr());
-
-            p_event = wiced_bt_mesh_create_event(0, MESH_VENDOR_CYPRESS_COMPANY_ID, MESH_VENDOR_SELF_CONFIG_MODEL_ID, src, EMBEDDED_PROV_APP_KEY_IDX);
-            if (p_event)
-            {
-                p_event->retrans_cnt = 1;       // Try 1 times (this is in addition to network layer retransmit)
-                p_event->retrans_time = 10;     // Every 500 msec
-            }
-            p = buffer;
-            UINT8_TO_STREAM(p, MESH_VENDOR_OPCODE_CONFIGURE_COMPLETE);
-            wiced_bt_mesh_models_utils_send(p_event, NULL, WICED_TRUE, MESH_VENDOR_CYPRSESS_OPCODE_CONFIG, buffer, (uint16_t)(p - buffer), NULL);
-
+        // it can be a retransmission
+        if (self_configuration_done)
             return WICED_TRUE;
+
+        self_configuration_done = WICED_TRUE;
+
+        self_configure(wiced_bt_mesh_core_get_local_addr());
+
+        p_event = wiced_bt_mesh_create_event(0, MESH_VENDOR_CYPRESS_COMPANY_ID, MESH_VENDOR_SELF_CONFIG_MODEL_ID, src, EMBEDDED_PROV_APP_KEY_IDX);
+        if (p_event)
+        {
+            p_event->retrans_cnt = 1;       // Try 1 times (this is in addition to network layer retransmit)
+            p_event->retrans_time = 10;     // Every 500 msec
         }
+        p = buffer;
+        UINT8_TO_STREAM(p, MESH_VENDOR_OPCODE_CONFIGURE_COMPLETE);
+        wiced_bt_mesh_models_utils_send(p_event, NULL, WICED_TRUE, MESH_VENDOR_CYPRSESS_OPCODE_CONFIG, buffer, (uint16_t)(p - buffer), NULL);
+        return WICED_TRUE;
 #endif
+#if defined(RSSI_TEST)
+    case MESH_CY_VENDOR_SUBCODE_RSSI_TEST_TX_START:
+        mesh_vendor_rssi_test_process_tx_start(p_event, p_data + 1, data_len - 1);
+        return WICED_TRUE;
+
+#if defined(EMBEDDED_PROVISION)
+    case MESH_CY_VENDOR_SUBCODE_RSSI_TEST_TX_START_STATUS:
+        mesh_vendor_rssi_test_process_tx_start_status(p_event, p_data + 1, data_len - 1);
+        return WICED_TRUE;
+#endif
+
+    case MESH_CY_VENDOR_SUBCODE_RSSI_TEST_DATA:
+        mesh_vendor_rssi_test_process_data(p_event, p_data + 1, data_len - 1);
+        return WICED_TRUE;
+
+    case MESH_CY_VENDOR_SUBCODE_RSSI_TEST_RX_VALUES_GET:
+        mesh_vendor_rssi_test_process_rx_values_get(p_event, p_data + 1, data_len - 1);
+        return WICED_TRUE;
+
+#if defined(EMBEDDED_PROVISION)
+    case MESH_CY_VENDOR_SUBCODE_RSSI_TEST_RX_VALUES_STATUS:
+        mesh_vendor_rssi_test_process_rx_values_status(p_event, p_data + 1, data_len - 1);
+        return WICED_TRUE;
+#endif
+
+#endif
+    default:
+        WICED_BT_TRACE("unknown subcode:%d\n", p_data[0]);
+        break;
     }
     wiced_bt_mesh_release_event(p_event);
     return WICED_TRUE;
@@ -1109,7 +1166,7 @@ void create_network(void)
     wiced_bt_mesh_local_device_set_data_t set;
     mesh_node_t node;
     wiced_result_t result;
-    uint8_t app_key[16];
+    // uint8_t app_key[16];
 
     memset(&set, 0, sizeof(set));
 
@@ -1193,12 +1250,12 @@ void configure_vs_self_config(uint16_t node_addr)
         p_event->retrans_cnt = 4;       // Try 5 times (this is in addition to network layer retransmit)
         p_event->retrans_time = 10;     // Every 500 msec
         p_event->reply_timeout = 80;    // wait for the reply 4 seconds
-    }
-    UINT8_TO_STREAM(p, MESH_VENDOR_OPCODE_CONFIGURE_SET);
 
-    wiced_bt_mesh_models_utils_send(p_event, &p_provisioner_state->p_out_event, WICED_TRUE, MESH_VENDOR_CYPRSESS_OPCODE_CONFIG, buffer, (uint16_t)(p - buffer), NULL);
+        UINT8_TO_STREAM(p, MESH_VENDOR_OPCODE_CONFIGURE_SET);
+
+        wiced_bt_mesh_models_utils_send(p_event, &p_provisioner_state->p_out_event, WICED_TRUE, MESH_VENDOR_CYPRSESS_OPCODE_CONFIG, buffer, (uint16_t)(p - buffer), NULL);
+    }
 }
-#endif
 
 /*
  * returns pointer to the dev_key of the node with address addr
@@ -1227,7 +1284,6 @@ const uint8_t* embedded_prov_get_dev_key_callback(uint16_t addr, uint16_t* p_net
     return NULL;
 }
 #endif
-
 #if defined(SELF_CONFIG) || defined(EMBEDDED_PROVISION)
 
 uint8_t cur_element_idx = 0;
@@ -1239,6 +1295,8 @@ void self_configure_next_op(TIMER_PARAM_TYPE arg)
     uint16_t node_addr = (uint16_t)arg;
 
     WICED_BT_TRACE("self_configure_next_op element:%d model:%d\n", cur_element_idx, cur_model_idx);
+
+    configure_net_beacon_set(node_addr, 0);
 
     for (element_idx = cur_element_idx; element_idx < mesh_config.elements_num; element_idx++)
     {
@@ -1414,6 +1472,26 @@ void configure_model_pub(uint16_t node_addr, wiced_bt_mesh_core_config_model_t* 
 
     wiced_bt_mesh_config_model_publication_set(p_event, &data);
 }
+
+/*
+ * Send Config Net Beacon Set message to local or remote device.
+ */
+void configure_net_beacon_set(uint16_t node_addr, uint8_t state)
+{
+    wiced_bt_mesh_event_t* p_event;
+    wiced_bt_mesh_config_beacon_set_data_t data;
+
+    WICED_BT_TRACE("net beacon set addr:%04x state:%d\n", node_addr, state);
+
+    if ((p_event = mesh_configure_create_event(node_addr, node_addr != EMBEDDED_PROV_LOCAL_ADDR)) == NULL)
+    {
+        WICED_BT_TRACE("net beacon set no mem\n");
+        return;
+    }
+    data.state = state;
+    wiced_bt_mesh_config_beacon_set(p_event, &data);
+}
+
 
 /*
  * Send Generic Default Transition Time Set message to local or remote device.
@@ -1622,9 +1700,241 @@ void button_interrupt_handler(void* user_data, uint8_t pin)
             WICED_BT_TRACE("Device already provisioned addr:%04x. To reset press and hold for 3 secs\n", wiced_bt_mesh_core_get_local_addr());
             return;
         }
+        // When a button is pushed on the unprovisioned device, the device becomes Embedded Provisioner and creates network.
         p_provisioner_state->state = EMBEDDED_PROVISIONER_STATE_ACTIVE;
         create_network();
     }
 }
 
+#endif
+
+uint8_t fw_distribution_server_process_upload_start(wiced_bt_mesh_event_t* p_event, uint8_t* p_data, uint16_t data_len);
+uint8_t fw_distribution_server_process_nodes_add(wiced_bt_mesh_event_t* p_event, uint8_t* p_data, uint16_t data_len);
+uint8_t fw_distribution_server_process_distribution_start(wiced_bt_mesh_event_t* p_event, uint8_t* p_data, uint16_t data_len);
+void fw_distribution_server_blob_transfer_callback(uint16_t event, void* p_data);
+uint8_t fw_distribution_server_get_upload_phase(void);
+uint8_t mesh_fw_distribution_get_distribution_state(void);
+wiced_bool_t fw_distribution_server_get_upload_fw_id(mesh_dfu_fw_id_t *p_fw_id);
+void fw_update_client_send_status_complete_callback(wiced_bt_mesh_event_t *p_event);
+extern wiced_transport_buffer_pool_t* host_trans_pool;
+
+/*
+ * start distribution of the FW with FW_ID
+ */
+wiced_bool_t embedded_provisioner_start_dfu(mesh_dfu_fw_id_t *p_fw_id)
+{
+    mesh_node_t node;
+    wiced_result_t result;
+    uint8_t buffer[8 + sizeof(mesh_dfu_fw_id_t)];
+    uint8_t* p = buffer;
+    int i;
+    wiced_bool_t node_found = WICED_FALSE;
+
+    // delete all addresses from the distribution list to start clean
+    // fw_distribution_server_process_nodes_delete_all(NULL, NULL, 0);
+
+    // add all devices in the list (for the future, we may check the fw_id)
+    for (i = EMBEDDED_PROV_NODE_ADDR_FIRST + 1; i < EMBEDDED_PROV_NODE_ADDR_LAST; i++)
+    {
+        if (wiced_hal_read_nvram(i, sizeof(mesh_node_t), (uint8_t*)&node, &result) == sizeof(mesh_node_t))
+        {
+            buffer[0] = node.addr & 0xff;
+            buffer[1] = (node.addr >> 8) & 0xff;
+            fw_distribution_server_process_nodes_add(NULL, buffer, 2);
+            node_found = WICED_TRUE;
+        }
+    }
+    if (!node_found)
+        return WICED_FALSE;
+
+    p = buffer;
+    UINT16_TO_STREAM(p, EMBEDDED_PROV_APP_KEY_IDX);
+    UINT8_TO_STREAM(p, 0);
+    UINT16_TO_STREAM(p, EMBEDDED_PROV_DISTR_NODE_TIMEOUT);
+    UINT8_TO_STREAM(p, (WICED_BT_MESH_FW_TRANSFER_MODE_PUSH | (WICED_BT_MESH_FW_UPDATE_POLICY_VERIFY_AND_APPLY << 2) | (WICED_BT_MESH_FW_DISTRIBUTION_ADDRESS_MULTICAST << 3)));
+    UINT16_TO_STREAM(p, 0xFFFF);    // group address is broadcast
+    mesh_dfu_fw_id_to_data(p_fw_id, &p);
+
+    if (fw_distribution_server_process_distribution_start(NULL, buffer, (uint16_t)(p - buffer)) == WICED_BT_MESH_FW_DISTR_STATUS_SUCCESS)
+    {
+        fw_update_client_send_status_complete_callback(NULL);
+    }
+    return WICED_TRUE;
+}
+
+void mesh_provisioner_hci_send_status(uint8_t status)
+{
+    uint8_t* p_buffer = wiced_transport_allocate_buffer(host_trans_pool);
+    uint8_t* p = p_buffer;
+    wiced_result_t result;
+
+    if (p_buffer == NULL)
+    {
+        WICED_BT_TRACE("no buffer to send HCI status\n");
+    }
+    else
+    {
+        UINT8_TO_STREAM(p, status);
+        result = mesh_transport_send_data(HCI_CONTROL_MESH_EVENT_COMMAND_STATUS, p_buffer, (uint16_t)(p - p_buffer));
+        WICED_BT_TRACE("sent HCI status:%d result:%d\n", p_buffer[0], result);
+    }
+}
+
+void mesh_provisioner_hci_send_fw_distr_status(uint8_t status)
+{
+    uint8_t* p_buffer = wiced_transport_allocate_buffer(host_trans_pool);
+    uint8_t* p = p_buffer;
+    mesh_node_t node;
+    wiced_result_t result;
+    int num_nodes = 0;
+    int i;
+
+    if (p_buffer == NULL)
+    {
+        WICED_BT_TRACE("no buffer to send FW distr status\n");
+    }
+    else
+    {
+        UINT8_TO_STREAM(p, status);
+        UINT8_TO_STREAM(p, fw_distribution_server_get_upload_phase());
+        UINT8_TO_STREAM(p, mesh_fw_distribution_get_distribution_state());
+
+        for (i = EMBEDDED_PROV_NODE_ADDR_FIRST; i < EMBEDDED_PROV_NODE_ADDR_LAST; i++)
+        {
+            if (wiced_hal_read_nvram(i, sizeof(mesh_node_t), (uint8_t*)&node, &result) == sizeof(mesh_node_t))
+            {
+                UINT16_TO_STREAM(p, node.addr);
+                num_nodes++;
+            }
+        }
+        result = mesh_transport_send_data(HCI_CONTROL_MESH_EVENT_FW_DISTRIBUTION_UPLOAD_STATUS, p_buffer, (uint16_t)(p - p_buffer));
+        WICED_BT_TRACE("sending status:%d phase:%d state:%d result:%d num_nodes:%d\n", p_buffer[0], p_buffer[1], p_buffer[2], result, num_nodes);
+    }
+}
+
+#if defined(RSSI_TEST)
+wiced_bool_t rssi_test_started_by_host = WICED_FALSE;
+
+void rssi_test_send_hci_result(uint16_t src, uint16_t report_addr, uint16_t rx_count, int8_t rx_rssi)
+{
+    uint8_t* p_buffer;
+    uint8_t* p;
+    wiced_result_t result;
+
+    if (!rssi_test_started_by_host)
+        return;
+
+    p_buffer = wiced_transport_allocate_buffer(host_trans_pool);
+    p = p_buffer;
+
+    if (p_buffer == NULL)
+    {
+        WICED_BT_TRACE("no buffer to send HCI status\n");
+    }
+    else
+    {
+        UINT16_TO_STREAM(p, src);
+        UINT16_TO_STREAM(p, report_addr);
+        UINT16_TO_STREAM(p, rx_count);
+        UINT8_TO_STREAM(p, rx_rssi);
+        result = mesh_transport_send_data(HCI_CONTROL_MESH_EVENT_RSSI_TEST_RESULT, p_buffer, (uint16_t)(p - p_buffer));
+        WICED_BT_TRACE("Sent RSSI Test result:%d\n", result);
+    }
+}
+#endif
+
+/*
+ * In 2 chip solutions MCU can send commands to change provisioner state.
+ */
+uint32_t mesh_app_proc_rx_cmd(uint16_t opcode, uint8_t* p_data, uint32_t length)
+{
+    uint8_t status = WICED_BT_MESH_FW_DISTR_STATUS_SUCCESS;
+    wiced_bt_mesh_event_t* p_event;
+    wiced_bt_mesh_blob_transfer_block_data_t data;
+    wiced_bt_mesh_blob_transfer_finish_t finish;
+    mesh_dfu_fw_id_t fw_id;
+#ifdef RSSI_TEST
+    uint16_t rssi_test_dst;
+    uint16_t rssi_test_count;
+    uint8_t  rssi_test_interval;
+#endif
+
+    WICED_BT_TRACE("HCI opcode:%x\n", opcode);
+    switch (opcode)
+    {
+    case HCI_CONTROL_MESH_COMMAND_FW_DISTRIBUTION_UPLOAD_START:
+        if (!wiced_firmware_upgrade_init_nv_locations())
+        {
+            WICED_BT_TRACE("failed init nv locations\n");
+            status = WICED_BT_MESH_FW_DISTR_STATUS_NOT_SUPPORTED;
+        }
+        else
+        {
+            status = fw_distribution_server_process_upload_start(NULL, p_data, length);
+        }
+        mesh_provisioner_hci_send_fw_distr_status(status);
+
+        if (status == WICED_BT_MESH_FW_DISTR_STATUS_SUCCESS)
+            fw_distribution_server_blob_transfer_callback(WICED_BT_MESH_BLOB_TRANSFER_START, NULL);
+        break;
+
+    case HCI_CONTROL_MESH_COMMAND_FW_DISTRIBUTION_UPLOAD_DATA:
+        STREAM_TO_UINT32(data.offset, p_data);
+        data.data_len = length - 4;
+        data.p_data = p_data;
+        WICED_BT_TRACE("Upload data offset:%d len:%d\n", data.offset, data.data_len);
+        fw_distribution_server_blob_transfer_callback(WICED_BT_MESH_BLOB_TRANSFER_DATA, &data);
+        mesh_provisioner_hci_send_fw_distr_status(status);
+        break;
+
+    case HCI_CONTROL_MESH_COMMAND_FW_DISTRIBUTION_UPLOAD_FINISH:
+        STREAM_TO_UINT8(finish.blob_transfer_result, p_data);
+        WICED_BT_TRACE("Upload finish\n");
+        fw_distribution_server_blob_transfer_callback(WICED_BT_MESH_BLOB_TRANSFER_FINISH, &finish);
+        mesh_provisioner_hci_send_fw_distr_status(status);
+
+        // Check if FW ID is for any of the devices on the network
+        fw_distribution_server_get_upload_fw_id(&fw_id);
+
+        if (!embedded_provisioner_start_dfu(&fw_id))
+            wiced_firmware_upgrade_finish();
+        break;
+
+    case HCI_CONTROL_MESH_COMMAND_FW_DISTRIBUTION_UPLOAD_GET_STATUS:
+        mesh_provisioner_hci_send_fw_distr_status(0);
+        break;
+
+#if defined(RSSI_TEST)
+    case HCI_CONTROL_MESH_COMMAND_RSSI_TEST_START:
+        rssi_test_started_by_host = WICED_TRUE;
+
+        STREAM_TO_UINT16(rssi_test_dst, p_data);
+        STREAM_TO_UINT16(rssi_test_count, p_data);
+        STREAM_TO_UINT8(rssi_test_interval, p_data);
+        rssi_test_start(rssi_test_dst, rssi_test_count, rssi_test_interval, 0);
+        break;
+#endif
+
+    default:
+        WICED_BT_TRACE("unknown\n");
+        break;
+    }
+    mesh_provisioner_hci_send_status(status);
+    return WICED_TRUE;
+}
+
+// To catch lost buffers. Functions wiced_bt_get_buffer_deb and wiced_bt_free_buffer_deb are implemented in the mesh_application.c which doesn't include that mesh_trace.h file
+#ifdef _DEB_TRACE_BUF
+void* wiced_bt_get_buffer_deb(uint32_t buffer_size)
+{
+    void* p_buf = wiced_bt_get_buffer(buffer_size);
+    WICED_BT_TRACE("get_buffer: p_mem:%x %d\n", (uint32_t)p_buf, buffer_size);
+    return p_buf;
+}
+
+void wiced_bt_free_buffer_deb(void* p_buf)
+{
+    WICED_BT_TRACE("free_buffer: p_mem:%x\n", (uint32_t)p_buf);
+    wiced_bt_free_buffer(p_buf);
+}
 #endif

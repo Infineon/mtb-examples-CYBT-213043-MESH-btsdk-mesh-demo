@@ -33,7 +33,39 @@
 
 /** @file
  *
- * This file shows how to create a device which publishes Generic Power Level Server.
+ * This Light Smart demo application shows a simple implementation of a Light
+ * Controller.The app is based on the snip/mesh/mesh_light_lc sample which
+ * implements BLE Mesh Light LC (Lightness Control) Server model. As a Light LC
+ * device, the Light Smart application allows two types of the controls
+ * depending on the Light LC Mode state. If Light LC Mode is on the,
+ * application is controlled by the occupancy sensor input and can be also
+ * controlled by the Light LC On/Off or Generic On/Off messages sent to the
+ * Light LC element of the device. If Light LC Mode is off, the Light Smart
+ * is controlled by the Generic On/Off, Generic Level, or Light Lightness
+ * messages sent to the first (Light Lightness) element of the device.
+ *
+ * When Light LC Mode is on, the app executes Light LC state machine. On
+ * Occupancy detection, the LED is fading on, then stays in Run state, then
+ * fades off, stays in the Prolong state, and fades to standby automatic
+ * state. The timing of the state machines and the lightness levels in all
+ * states are controlled by the properties configured in the
+ * mesh_element2_properties.
+ *
+ * The application button on the EVK board can also be used to duplication
+ * On/Off messages. For example, push of the button simulates Light LC On
+ * message which fades on the LED.
+ *
+ * To perform factory reset, push and hold the application button for more
+ * than 5 seconds.
+ *
+ * Features demonstrated
+ *  - LED usage on the EVK
+ *  - Occupancy sensor of the EVK
+ *  - Processing of the Light Lightness messages
+ *
+ * To demonstrate the app, work through the following steps.
+ * 1. Build and download the application (to the WICED board)
+ * 2. Use Mesh Client or Client Control to provision the Light Smart app
  *
  */
 #include "wiced_bt_ble.h"
@@ -197,7 +229,7 @@ wiced_bt_mesh_core_config_t  mesh_config =
     .features = WICED_BT_MESH_CORE_FEATURE_BIT_FRIEND | WICED_BT_MESH_CORE_FEATURE_BIT_RELAY | WICED_BT_MESH_CORE_FEATURE_BIT_GATT_PROXY_SERVER,   // Supports Friend, Relay and GATT Proxy
     .friend_cfg         =                                           // Configuration of the Friend Feature(Receive Window in Ms, messages cache)
     {
-        .receive_window        = 200,
+        .receive_window        = 20,
         .cache_buf_len         = 300,                               // Length of the buffer for the cache
         .max_lpn_num           = 4                                  // Max number of Low Power Nodes with established friendship. Must be > 0 if Friend feature is supported.
     },
@@ -407,13 +439,13 @@ void button_interrupt_handler(void* user_data, uint8_t pin)
     }
     // button is released
     button_pushed_duration = current_time - button_pushed_time;
-    if (button_pushed_duration < 15000)
+    if (button_pushed_duration < 5000)
     {
         process_button_push(MESH_LIGHT_LC_CONTROL_ELEMENT_INDEX);
     }
     else
     {
-        // More than 15 seconds means factory reset
+        // More than 5 seconds means factory reset
         mesh_application_factory_reset();
     }
 }

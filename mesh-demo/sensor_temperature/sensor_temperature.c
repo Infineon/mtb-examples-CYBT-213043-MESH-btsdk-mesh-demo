@@ -235,7 +235,7 @@ wiced_bt_mesh_core_config_t  mesh_config =
     .features           = WICED_BT_MESH_CORE_FEATURE_BIT_FRIEND | WICED_BT_MESH_CORE_FEATURE_BIT_RELAY | WICED_BT_MESH_CORE_FEATURE_BIT_GATT_PROXY_SERVER,   // In Friend mode support friend, relay
     .friend_cfg         =                                           // Configuration of the Friend Feature(Receive Window in Ms, messages cache)
     {
-        .receive_window        = 200,
+        .receive_window        = 20,
         .cache_buf_len         = 300,                               // Length of the buffer for the cache
         .max_lpn_num           = 4                                  // Max number of Low Power Nodes with established friendship. Must be > 0 if Friend feature is supported.
     },

@@ -222,6 +222,7 @@ endif
 export CONFIG
 export COMPONENTS
 export DISABLE_COMPONENTS
+-include internal.mk
 CY_SHARED_LIB_ARGS:=$(MAKECMDGOALS) CY_APP_DEFINES+="$(CY_APP_DEFINES)" CY_TARGET_DEVICE=$(CY_TARGET_DEVICE) TARGET=$(TARGET)
 
 .PHONY: $(SEARCH_LIBS_AND_INCLUDES) shared_libs
@@ -234,7 +235,6 @@ $(SEARCH_LIBS_AND_INCLUDES):
 CY_APP_LOCATION=$(lastword $(MAKEFILE_LIST))
 
 CY_APP_BUILD_GOALS:=build qbuild clean program qprogram debug qdebug all
--include internal.mk
 ifeq ($(filter setup teardown,$(MAKECMDGOALS)),)
 
 # ensure pre-requisite wiced_btsdk project is present

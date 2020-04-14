@@ -65,6 +65,6 @@ extern void mesh_scanner_process_scan_report(wiced_bt_mesh_event_t* p_event, wic
 extern wiced_bool_t mesh_scanner_scan_start(uint8_t node_idx);
 
 /*
- * Free unprovisioned node structure
+ * Notify Scanner that provisioning for one of the nodes has been completed
  */
-extern void mesh_scanner_free_unprov_node(mesh_unprov_node_t* p_unprov_node);
+extern void mesh_scanner_provision_end(mesh_unprov_node_t* p_unprov_node);

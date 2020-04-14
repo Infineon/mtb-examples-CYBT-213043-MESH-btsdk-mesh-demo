@@ -4,16 +4,33 @@ Mesh Embedded Provisioner application
 
 Overview
 --------
-This demo application shows an implementation of a dimmable light which
-also serves as an embedded provisioner. A network may only have a single
-device like that. To build application, specify EMBEDDED_PROVISIONER=1 in
-the command line, or in a make file. For example
-demo.mesh.embedded_provisioner-CYW920719Q40EVB_01 EMBEDDED_PROVISION=1 download
+This demo application shows an implementation of a self organized BLE mesh
+network. One of the devices shall become an embedded provisioner. The device
+which becomes and embedded provisioner searches for the unprovisioned devices
+and adds them to the network. A network may only have a single embedded
+provisioner. To build application, followingflags shall be set to 1 in the
+makefile.
 
-When embedded provisioner device starts for the very first time, it
-creates a network, provisions the local device into the network and reboots.
-The next time the app starts up, it is already provisioned. The app
-uses Remote Provisioning Service feature to add devices to the network.
+SELF_CONFIG?=1
+EMBEDDED_PROVISION?=1
+
+The sample application waits for the button push (interrupt) as an indication
+that it needs to assume the embedded provisioner role. When swtich to the
+embedded provisioner the it creates a network, provisions the local device
+into the network and reboots. The next time the app starts up, it is already
+provisioned and serves as the provisioner to the network. When a new
+unprovisioned device is found, the embedded provisioner check it device
+matches required criteria, for example, some pattern in the UUID, and if
+matches, provisions and configures the device to the network.
+
+A device which is not set to be an embedded provisioner acts as a normal
+BLE Mesh network device. In addition to that it supports a vendor specific
+model which allows quicker configuration. If a provisioner sends the vendor
+specific command to perform a self config, the device binds all existing
+models to an existing app key. And subscribes all the models to a hardcoded
+group address (0xC000).
+
+The app uses Remote Provisioning Service feature to add devices to the network.
 On startup the app goes through all network devices and tells them to scan
 for unprovisioned devices. When a new device is found by, the app starts
 a guard timeout to allow other provisioners to report the same device and
@@ -31,69 +48,37 @@ do that the app adds an application key, binds vendor specific model to
 this application key and then sends the command to self configure. The
 configuration values are hardcoded in the embedded_provisioner.h file.
 
-The app is based on the snip/mesh/mesh_light_lightness sample which
-implements BLE Mesh Light Lightness Server model. Because Light Lightness
-Server model extends Generic OnOff and Generic Level, the dimmable
-light can be controlled by a Switch (Generic OnOff Client), a Dimmer
-(Generic Level Client), or by an application which implements Light
-Lightness Client.  The WICED Mesh Models library takes care of the
-translation of the OnOff and Level messages and the only messages
-that the application layer needs to process is those of the Light
-Lightness Model.
-
-This application supports factory reset via five fast power off cycles:
-  turn off device in less than 5 seconds after power on and do it five times.
-It increments the power on counter (persistent in the NVRAM) on each power on
-  and does factory reset when counter reaches 5. It resets that counter when
-  device stays in the power on state for longer than 5 seconds.
+This application also support DFU feature. An MCU can download an
+image to the embedded provisioner over WICED HCI UART and tell the app
+to perform download to all other devices in the network. The app uses
+the BT SIG Mesh DFU procedure to perform the download. At the end of the
+DFU the receivers verify the image using ECDSA procedure. To support
+this functionality each application shall include ecdsa256_pub.c. The
+project directory also contains the private key ecdsa256_key.pri.bin
+that was used to generate the public key. The pair needs to be replaced
+for production. See tools/ecdsa directory for more information.
 
 Features demonstrated
  - Autoprovisioning and configuration of unprovisioned devices
- - LED usage on the CYBT-213043-MESH EZ-BT Mesh Evaluation Kit / CYW920819EVB-02 Evaluation Kit
- - Processing of the Light Lightness messages
+ - Vendor Specific self configuration
+ - BLE Mesh DFU
 
 See chip specific readme for more information about the BT SDK.
 
 Instructions
 ------------
 To demonstrate the app, work through the following steps.
-1. Build and download the application to the Mesh Evaluation Kit / CYW920819EVB-02 Evaluation Kit
-2. Build and download a controlling application such as BLE MeshDimmerSelfConfig to another Mesh Evaluation Kit
-   / CYW920819EVB-02 Evaluation Kit
-3. This application will detect an unprovisioned device, provision it into the network and configure.
-4. Push/release the  user button (SW3) on the dimmer board.  The LED (LED1 on Mesh Evaluation Kit
-   / LED 2 on CYW920819EVB-02 Evaluation Kit) on the light bulb side should turn on.
-5. Push/release the user button (SW3) on the dimmer board.  The LED on the light bulb
-   side should turn off.
-6. Push and hold the user button (SW3) on the dimmer board.  The LED on the light bulb
-   side should gradually go from Off to On within 4 seconds.
-7. Push and hold the user button (SW3) on the dimmer board.  The LED on the light bulb
-   side should gradually go from On to Off within 4 seconds.
-8. Try pushing and holding button for less than 4 seconds, and all other
-   combinations.
+1. Build and download the application to several 213043-MESH Kits.
+2. Push and release a button on one of the kits to set it up as an embedded provisioner.
 
 Notes
 -----
 1. The board will factory reset if you press and hold the user button (SW3) on
-   the board for more than 15 seconds.
+   the board for more than 3 seconds.
 2. The application GATT database is located in -
    bt_sdk-1.x\components\BT-SDK\common\libraries\mesh_app_lib\mesh_app_gatt.c
    If you create a GATT database using Bluetooth Configurator, update the
    GATT database in the location mentioned above.
 
-Project Settings
-----------------
-Application specific project settings are as below -
-
-MESH_MODELS_DEBUG_TRACES
-   Turn on debug trace from Mesh Models library
-MESH_CORE_DEBUG_TRACES
-   Turn on debug trace from Mesh Core library
-MESH_PROVISIONER_DEBUG_TRACES
-   Turn on debug trace from Mesh Provisioner library
-REMOTE_PROVISION_SRV
-   Enable device as Remote Provisioning Server
-LOW_POWER_NODE
-   Enable device as Low Power Node
 
 -------------------------------------------------------------------------------
