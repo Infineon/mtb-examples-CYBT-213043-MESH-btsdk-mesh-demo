@@ -151,8 +151,8 @@ endif
 
 # These flags control whether the prebuilt mesh libs (core, models, and provisioner)
 # will be the trace enabled versions or not
-MESH_MODELS_DEBUG_TRACES ?= 0
-MESH_CORE_DEBUG_TRACES ?= 0
+MESH_MODELS_DEBUG_TRACES ?= 1
+MESH_CORE_DEBUG_TRACES ?= 1
 MESH_PROVISIONER_DEBUG_TRACES ?= 0
 
 CY_APP_DEFINES += -DMESH_CORE_DEBUG_LEVEL
@@ -186,6 +186,8 @@ ifeq ($(CY_TARGET_DEVICE),20706A2)
 CY_APP_PATCH_LIBS += rtc_lib.a
 CY_APP_PATCH_LIBS += wiced_bt_mesh.a
 endif
+
+# CY_APP_PATCH_LIBS += mesh_optimized_continuous_scan_lib.a
 
 ################################################################################
 # Paths
@@ -261,9 +263,11 @@ CY_SHARED_LIB_ARGS:=$(MAKECMDGOALS) $(MAKE_OVERRIDES) CY_APP_DEFINES+="$(CY_APP_
 .PHONY: $(SEARCH_LIBS_AND_INCLUDES) shared_libs
 
 # recursive make on each shared_lib project
+ifneq ($(filter qprogram,$(MAKECMDGOALS)),qprogram)
 shared_libs: $(SEARCH_LIBS_AND_INCLUDES)
 $(SEARCH_LIBS_AND_INCLUDES):
 	$(MAKE) -C $@ $(CY_SHARED_LIB_ARGS)
+endif
 
 CY_APP_LOCATION=$(lastword $(MAKEFILE_LIST))
 

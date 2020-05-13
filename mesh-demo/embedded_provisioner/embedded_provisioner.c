@@ -352,7 +352,7 @@ static void mesh_provisioner_process_device_capabilities(wiced_bt_mesh_event_t *
 static void mesh_provisioner_process_device_get_oob_data(wiced_bt_mesh_event_t *p_event, wiced_bt_mesh_provision_device_oob_request_data_t *p_data);
 extern int find_rpr_idx(uint16_t rpr_addr);
 
-uint8_t static_oob[16];
+uint8_t static_oob[16] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f };
 #endif
 
 mesh_embedded_provisioner_state_t *p_provisioner_state = NULL;
@@ -369,7 +369,7 @@ void mesh_app_init(wiced_bool_t is_provisioned)
     mesh_node_t node;
 
 #if defined(SELF_CONFIG) && defined(EMBEDDED_PROVISION)
-    WICED_BT_TRACE("Embedded provisioner and Self Config event:%d unprov:%d\n", sizeof(wiced_bt_mesh_event_t), sizeof(mesh_unprov_node_t));
+    WICED_BT_TRACE("Embedded provisioner and Self Config\n");
 #elif defined(EMBEDDED_PROVISION)
     WICED_BT_TRACE("Embedded provisioner\n");
 #elif defined(SELF_CONFIG)
@@ -731,69 +731,10 @@ void mesh_provisioner_process_device_capabilities(wiced_bt_mesh_event_t* p_event
  */
 void mesh_provisioner_process_device_get_oob_data(wiced_bt_mesh_event_t *p_event, wiced_bt_mesh_provision_device_oob_request_data_t *p_data)
 {
-    uint16_t rpr_addr = p_event->src;
-    wiced_bt_mesh_provision_oob_value_data_t oob;
-    int i;
-    uint32_t max_value;
-    uint32_t rand = wiced_hal_rand_gen_num();
-
     WICED_BT_TRACE("\n\n#####OOB get: type:%d size:%d action:%d\n", p_data->type, p_data->size, p_data->action);
-#if 0
-    if (p_data->type == WICED_BT_MESH_PROVISION_GET_OOB_TYPE_DISPLAY_OUTPUT)
-    {
-        // sanity check.  max should be less or equal to 8
-        oob.data_size = (p_data->size > 8) ? 8 : p_data->size;
-
-        // Generate output depending on the action
-        switch (p_data->action)
-        {
-        case WICED_BT_MESH_PROVISION_OUT_OOB_ACT_DISP_NUM:
-            for (i = 0; i < oob.data_size; i++)
-            {
-                uint32_t rand = wiced_hal_rand_gen_num();
-                oob.data[i] = (rand % 9);
-                WICED_BT_TRACE("%d %d", rand, oob.data[i]);
-            }
-            WICED_BT_TRACE("\n");
-            break;
-
-        case WICED_BT_MESH_PROVISION_OUT_OOB_ACT_DISP_ALPH:
-            for (i = 0; i < oob.data_size; )
-            {
-                oob.data[i] = (wiced_hal_rand_gen_num() % 'Z');
-                if (((oob.data[i] > '0') && (oob.data[i] <= '9')) ||
-                    ((oob.data[i] > 'A') && (oob.data[i] <= 'Z')))
-                {
-                    WICED_BT_TRACE("%c", oob.data[i]);
-                    i++;
-                }
-            }
-            WICED_BT_TRACE("\n", oob.data[i]);
-            break;
-        default:
-        //case WICED_BT_MESH_PROVISION_OUT_OOB_ACT_BLINK:
-        //case WICED_BT_MESH_PROVISION_OUT_OOB_ACT_BEEP:
-        //case WICED_BT_MESH_PROVISION_OUT_OOB_ACT_VIBRATE:
-            oob.data[0] = (wiced_hal_rand_gen_num() % 8) + 1;
-            WICED_BT_TRACE("%d\n", oob.data[0]);
-            oob.data_size = 1;
-            break;
-        }
-        // oob.conn_id = p_data->conn_id;
-        wiced_bt_mesh_provision_set_oob(&oob);
-    }
-    else if (p_data->type == WICED_BT_MESH_PROVISION_GET_OOB_TYPE_ENTER_INPUT)
-    {
-        mesh_provisioner_hci_event_device_get_oob_data_send(p_data);
-    }
-    else
-#endif
     if (p_data->type == WICED_BT_MESH_PROVISION_GET_OOB_TYPE_GET_STATIC)
     {
-        // oob.conn_id = p_data->conn_id;
-        memcpy(oob.data, static_oob, sizeof(static_oob));
-        oob.data_size = sizeof(static_oob);
-        wiced_bt_mesh_provision_set_oob(&oob);
+        wiced_bt_mesh_provision_set_oob(static_oob, sizeof(static_oob));
     }
     else
     {
@@ -926,6 +867,14 @@ void mesh_configure_app_key_status(wiced_bt_mesh_event_t *p_event, wiced_bt_mesh
     WICED_BT_TRACE("AppKey Status from:%04x status:%d NetKeyIdx:%x ApptKeyIdx:%x\n", src,
         p_data->status, p_data->net_key_idx, p_data->app_key_idx);
 
+#if 0
+    // This may be initial creation of the network
+    if (p_provisioner_state->state == EMBEDDED_PROVISIONER_STATE_RESET)
+    {
+        self_configure(EMBEDDED_PROV_LOCAL_ADDR);
+        return;
+    }
+#endif
     for (i = EMBEDDED_PROV_NODE_ADDR_FIRST + 1; i < EMBEDDED_PROV_NODE_ADDR_LAST; i++)
     {
         if ((wiced_hal_read_nvram(i, sizeof(mesh_node_t), (uint8_t*)&node, &result) == sizeof(mesh_node_t)) &&
@@ -1204,8 +1153,9 @@ void create_network(void)
     }
 
     configure_app_key_add(node.addr, EMBEDDED_PROV_NET_KEY_IDX, app_key, EMBEDDED_PROV_APP_KEY_IDX);
-
+#if 1
     self_configure(EMBEDDED_PROV_LOCAL_ADDR);
+#endif
 }
 
 /*
