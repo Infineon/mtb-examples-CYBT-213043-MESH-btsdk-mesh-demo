@@ -1,5 +1,5 @@
 #
-# Copyright 2020, Cypress Semiconductor Corporation or a subsidiary of
+# Copyright 2016-2020, Cypress Semiconductor Corporation or a subsidiary of
 # Cypress Semiconductor Corporation. All Rights Reserved.
 #
 # This software, including source code, documentation and related
@@ -53,8 +53,7 @@ SUPPORTED_TARGETS = \
   CYBT-213043-EVAL \
   CYW920721B2EVK-03 \
   CYW920721B2EVK-02 \
-  CYW920719B2Q40EVB-01 \
-  CYW920706WCDEVAL
+  CYW920719B2Q40EVB-01
 
 TARGET_DEVICE_MAP = \
   CYW920819EVB-02/20819A1 \
@@ -63,8 +62,7 @@ TARGET_DEVICE_MAP = \
   CYBT-213043-EVAL/20819A1 \
   CYW920721B2EVK-03/20721B2 \
   CYW920721B2EVK-02/20721B2 \
-  CYW920719B2Q40EVB-01/20719B2 \
-  CYW920706WCDEVAL/20706A2
+  CYW920719B2Q40EVB-01/20719B2
 
 CY_TARGET_DEVICE = $(patsubst $(TARGET)/%,%,$(filter $(TARGET)%,$(TARGET_DEVICE_MAP)))
 
@@ -120,7 +118,7 @@ CY_APP_DEFINES+=\
     -DHCI_CONTROL
 
 ifeq ($(MESH_DFU),1)
-CY_APP_DEFINES += -DMESH_DFU_SUPPORTED
+#CY_APP_DEFINES += -DMESH_DFU_SUPPORTED
 endif
 
 # value of the LOW_POWER_NODE defines mode. It can be normal node (0), or low power node (1)

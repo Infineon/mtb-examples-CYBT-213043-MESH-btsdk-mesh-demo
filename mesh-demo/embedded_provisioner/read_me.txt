@@ -4,19 +4,19 @@ Mesh Embedded Provisioner application
 
 Overview
 --------
-This demo application shows an implementation of a self organized BLE mesh
+This demo application shows an implementation of a self-organized BLE mesh
 network. One of the devices shall become an embedded provisioner. The device
-which becomes and embedded provisioner searches for the unprovisioned devices
+which becomes an embedded provisioner searches for the unprovisioned devices
 and adds them to the network. A network may only have a single embedded
-provisioner. To build application, followingflags shall be set to 1 in the
+provisioner. To build application, following flags shall be set to 1 in the
 makefile.
 
 SELF_CONFIG?=1
 EMBEDDED_PROVISION?=1
 
 The sample application waits for the button push (interrupt) as an indication
-that it needs to assume the embedded provisioner role. When swtich to the
-embedded provisioner the it creates a network, provisions the local device
+that it needs to assume the embedded provisioner role. When it assumes the
+role of embedded provisioner the it creates a network, provisions the local device
 into the network and reboots. The next time the app starts up, it is already
 provisioned and serves as the provisioner to the network. When a new
 unprovisioned device is found, the embedded provisioner check it device
@@ -45,13 +45,13 @@ preprogrammed list of UUIDs and some OOB data.
 
 After the new device is provisioned, the app performs configuration. To
 do that the app adds an application key, binds vendor specific model to
-this application key and then sends the command to self configure. The
+this application key and then sends the command to self-configure. The
 configuration values are hardcoded in the embedded_provisioner.h file.
 
 This application also support DFU feature. An MCU can download an
 image to the embedded provisioner over WICED HCI UART and tell the app
 to perform download to all other devices in the network. The app uses
-the BT SIG Mesh DFU procedure to perform the download. At the end of the
+the DFU procedure to perform the download. At the end of the
 DFU the receivers verify the image using ECDSA procedure. To support
 this functionality each application shall include ecdsa256_pub.c. The
 project directory also contains the private key ecdsa256_key.pri.bin
@@ -59,9 +59,9 @@ that was used to generate the public key. The pair needs to be replaced
 for production. See tools/ecdsa directory for more information.
 
 Features demonstrated
- - Autoprovisioning and configuration of unprovisioned devices
- - Vendor Specific self configuration
- - BLE Mesh DFU
+- Autoprovisioning and configuration of unprovisioned devices
+- Vendor Specific self-configuration
+- DFU
 
 See chip specific readme for more information about the BT SDK.
 
@@ -76,9 +76,6 @@ Notes
 1. The board will factory reset if you press and hold the user button (SW3) on
    the board for more than 3 seconds.
 2. The application GATT database is located in -
-   bt_sdk-1.x\components\BT-SDK\common\libraries\mesh_app_lib\mesh_app_gatt.c
+   wiced_btsdk\dev-kit\libraries\btsdk-mesh\COMPONENT_mesh_app_lib\mesh_app_gatt.c
    If you create a GATT database using Bluetooth Configurator, update the
    GATT database in the location mentioned above.
-
-
--------------------------------------------------------------------------------

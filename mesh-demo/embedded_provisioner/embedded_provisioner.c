@@ -1,5 +1,5 @@
 /*
-* Copyright 2020, Cypress Semiconductor Corporation or a subsidiary of
+* Copyright 2016-2020, Cypress Semiconductor Corporation or a subsidiary of
 * Cypress Semiconductor Corporation. All Rights Reserved.
 *
 * This software, including source code, documentation and related
@@ -116,6 +116,9 @@
 #include "wiced_firmware_upgrade.h"
 #include "wiced_bt_mesh_model_utils.h"
 #include "wiced_bt_mesh_provision.h"
+#if defined(MESH_DFU_SUPPORTED)
+#include "wiced_bt_mesh_dfu.h"
+#endif
 #include "mesh_application.h"
 #include "embedded_provisioner.h"
 #if defined(EMBEDDED_PROVISION)
@@ -433,7 +436,7 @@ void mesh_app_init(wiced_bool_t is_provisioned)
 #endif
 
 #if defined(MESH_DFU_SUPPORTED)
-    wiced_bt_mesh_model_fw_update_server_init(0, NULL, is_provisioned);
+    wiced_bt_mesh_model_fw_update_server_init(0, is_provisioned);
     wiced_bt_mesh_model_fw_distribution_server_init();
     wiced_bt_mesh_model_blob_transfer_server_init(0);
 #endif
@@ -1658,6 +1661,9 @@ void button_interrupt_handler(void* user_data, uint8_t pin)
 
 #endif
 
+extern wiced_transport_buffer_pool_t* host_trans_pool;
+
+#if defined(MESH_DFU_SUPPORTED)
 uint8_t fw_distribution_server_process_upload_start(wiced_bt_mesh_event_t* p_event, uint8_t* p_data, uint16_t data_len);
 uint8_t fw_distribution_server_process_nodes_add(wiced_bt_mesh_event_t* p_event, uint8_t* p_data, uint16_t data_len);
 uint8_t fw_distribution_server_process_distribution_start(wiced_bt_mesh_event_t* p_event, uint8_t* p_data, uint16_t data_len);
@@ -1666,7 +1672,6 @@ uint8_t fw_distribution_server_get_upload_phase(void);
 uint8_t mesh_fw_distribution_get_distribution_state(void);
 wiced_bool_t fw_distribution_server_get_upload_fw_id(mesh_dfu_fw_id_t *p_fw_id);
 void fw_update_client_send_status_complete_callback(wiced_bt_mesh_event_t *p_event);
-extern wiced_transport_buffer_pool_t* host_trans_pool;
 
 /*
  * start distribution of the FW with FW_ID
@@ -1712,24 +1717,6 @@ wiced_bool_t embedded_provisioner_start_dfu(mesh_dfu_fw_id_t *p_fw_id)
     return WICED_TRUE;
 }
 
-void mesh_provisioner_hci_send_status(uint8_t status)
-{
-    uint8_t* p_buffer = wiced_transport_allocate_buffer(host_trans_pool);
-    uint8_t* p = p_buffer;
-    wiced_result_t result;
-
-    if (p_buffer == NULL)
-    {
-        WICED_BT_TRACE("no buffer to send HCI status\n");
-    }
-    else
-    {
-        UINT8_TO_STREAM(p, status);
-        result = mesh_transport_send_data(HCI_CONTROL_MESH_EVENT_COMMAND_STATUS, p_buffer, (uint16_t)(p - p_buffer));
-        WICED_BT_TRACE("sent HCI status:%d result:%d\n", p_buffer[0], result);
-    }
-}
-
 void mesh_provisioner_hci_send_fw_distr_status(uint8_t status)
 {
     uint8_t* p_buffer = wiced_transport_allocate_buffer(host_trans_pool);
@@ -1759,6 +1746,25 @@ void mesh_provisioner_hci_send_fw_distr_status(uint8_t status)
         }
         result = mesh_transport_send_data(HCI_CONTROL_MESH_EVENT_FW_DISTRIBUTION_UPLOAD_STATUS, p_buffer, (uint16_t)(p - p_buffer));
         WICED_BT_TRACE("sending status:%d phase:%d state:%d result:%d num_nodes:%d\n", p_buffer[0], p_buffer[1], p_buffer[2], result, num_nodes);
+    }
+}
+#endif
+
+void mesh_provisioner_hci_send_status(uint8_t status)
+{
+    uint8_t* p_buffer = wiced_transport_allocate_buffer(host_trans_pool);
+    uint8_t* p = p_buffer;
+    wiced_result_t result;
+
+    if (p_buffer == NULL)
+    {
+        WICED_BT_TRACE("no buffer to send HCI status\n");
+    }
+    else
+    {
+        UINT8_TO_STREAM(p, status);
+        result = mesh_transport_send_data(HCI_CONTROL_MESH_EVENT_COMMAND_STATUS, p_buffer, (uint16_t)(p - p_buffer));
+        WICED_BT_TRACE("sent HCI status:%d result:%d\n", p_buffer[0], result);
     }
 }
 
@@ -1798,11 +1804,13 @@ void rssi_test_send_hci_result(uint16_t src, uint16_t report_addr, uint16_t rx_c
  */
 uint32_t mesh_app_proc_rx_cmd(uint16_t opcode, uint8_t* p_data, uint32_t length)
 {
-    uint8_t status = WICED_BT_MESH_FW_DISTR_STATUS_SUCCESS;
+    uint8_t status = 0;
+#if defined(MESH_DFU_SUPPORTED)
     wiced_bt_mesh_event_t* p_event;
     wiced_bt_mesh_blob_transfer_block_data_t data;
     wiced_bt_mesh_blob_transfer_finish_t finish;
     mesh_dfu_fw_id_t fw_id;
+#endif
 #ifdef RSSI_TEST
     uint16_t rssi_test_dst;
     uint16_t rssi_test_count;
@@ -1812,6 +1820,7 @@ uint32_t mesh_app_proc_rx_cmd(uint16_t opcode, uint8_t* p_data, uint32_t length)
     WICED_BT_TRACE("HCI opcode:%x\n", opcode);
     switch (opcode)
     {
+#if defined(MESH_DFU_SUPPORTED)
     case HCI_CONTROL_MESH_COMMAND_FW_DISTRIBUTION_UPLOAD_START:
         if (!wiced_firmware_upgrade_init_nv_locations())
         {
@@ -1853,6 +1862,7 @@ uint32_t mesh_app_proc_rx_cmd(uint16_t opcode, uint8_t* p_data, uint32_t length)
     case HCI_CONTROL_MESH_COMMAND_FW_DISTRIBUTION_UPLOAD_GET_STATUS:
         mesh_provisioner_hci_send_fw_distr_status(0);
         break;
+#endif
 
 #if defined(RSSI_TEST)
     case HCI_CONTROL_MESH_COMMAND_RSSI_TEST_START:
